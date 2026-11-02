@@ -32,8 +32,9 @@ class MusicStore(context: Context) {
     @Synchronized fun addHistory(song: Song) {
         saveSong(song)
         val ids = readIds("history").toMutableList()
-        ids.remove(song.id); ids.add(0, song.id)
-        writeIds("history", ids.take(60))
+        ids.remove(song.id)
+        ids.add(0, song.id)
+        writeIds("history", ids.take(80))
     }
 
     @Synchronized fun history(): List<Song> = readIds("history").mapNotNull { getSong(it) }
@@ -42,15 +43,17 @@ class MusicStore(context: Context) {
         val clean = query.trim().take(100)
         if (clean.isBlank()) return
         val recent = listOf(clean) + readIds("search_history").filterNot { it.equals(clean, ignoreCase = true) }
-        writeIds("search_history", recent.take(8))
+        writeIds("search_history", recent.take(12))
     }
 
     @Synchronized fun searchHistory(): List<String> = readIds("search_history")
-
-    @Synchronized fun clearSearchHistory() {
-        writeIds("search_history", emptyList())
-    }
+    @Synchronized fun clearSearchHistory() = writeIds("search_history", emptyList())
     @Synchronized fun localSongs(): List<Song> = allSongs().filter { it.local }
+
+    @Synchronized fun jamendoClientId(): String = prefs.getString("jamendo_client_id", "").orEmpty().trim()
+    @Synchronized fun saveJamendoClientId(value: String) {
+        prefs.edit().putString("jamendo_client_id", value.trim()).apply()
+    }
 
     @Synchronized fun playlists(): List<MusicPlaylist> {
         val array = runCatching { JSONArray(prefs.getString("playlists", "[]")) }.getOrDefault(JSONArray())
@@ -68,44 +71,81 @@ class MusicStore(context: Context) {
 
     @Synchronized fun addToPlaylist(song: Song, playlistId: String) {
         saveSong(song)
-        writePlaylists(playlists().map { p -> if (p.id == playlistId && song.id !in p.songIds) p.copy(songIds = p.songIds + song.id) else p })
+        writePlaylists(playlists().map { p ->
+            if (p.id == playlistId && song.id !in p.songIds) p.copy(songIds = p.songIds + song.id) else p
+        })
     }
 
     @Synchronized fun removeFromPlaylist(songId: String, playlistId: String) {
         writePlaylists(playlists().map { p -> if (p.id == playlistId) p.copy(songIds = p.songIds - songId) else p })
     }
 
-    @Synchronized fun songsInPlaylist(playlist: MusicPlaylist): List<Song> = playlist.songIds.mapNotNull { getSong(it) }
-    @Synchronized fun deletePlaylist(playlistId: String) { writePlaylists(playlists().filterNot { it.id == playlistId }) }
+    @Synchronized fun songsInPlaylist(playlist: MusicPlaylist): List<Song> =
+        playlist.songIds.mapNotNull { getSong(it) }
+
+    @Synchronized fun deletePlaylist(playlistId: String) {
+        writePlaylists(playlists().filterNot { it.id == playlistId })
+    }
 
     private fun readSongs(): Map<String, Song> {
         val array = runCatching { JSONArray(prefs.getString("songs", "[]")) }.getOrDefault(JSONArray())
         val result = LinkedHashMap<String, Song>()
         for (i in 0 until array.length()) {
             val song = jsonToSong(array.optJSONObject(i) ?: continue)
-            result[song.id] = song
+            if (song.id.isNotBlank()) result[song.id] = song
         }
         return result
     }
 
-    private fun readIds(key: String): List<String> = runCatching { jsonArrayToStrings(JSONArray(prefs.getString(key, "[]"))) }.getOrDefault(emptyList())
-    private fun writeIds(key: String, ids: List<String>) { prefs.edit().putString(key, JSONArray(ids).toString()).apply() }
+    private fun readIds(key: String): List<String> =
+        runCatching { jsonArrayToStrings(JSONArray(prefs.getString(key, "[]"))) }.getOrDefault(emptyList())
+
+    private fun writeIds(key: String, ids: List<String>) {
+        prefs.edit().putString(key, JSONArray(ids).toString()).apply()
+    }
 
     private fun writePlaylists(playlists: List<MusicPlaylist>) {
         val array = JSONArray()
-        playlists.forEach { p -> array.put(JSONObject().apply { put("id", p.id); put("name", p.name); put("songs", JSONArray(p.songIds)) }) }
+        playlists.forEach { p ->
+            array.put(JSONObject().apply {
+                put("id", p.id)
+                put("name", p.name)
+                put("songs", JSONArray(p.songIds))
+            })
+        }
         prefs.edit().putString("playlists", array.toString()).apply()
     }
 
     private fun songToJson(song: Song) = JSONObject().apply {
-        put("id", song.id); put("title", song.title); put("artist", song.artist); put("album", song.album)
-        put("url", song.url); put("licenseUrl", song.licenseUrl); put("tags", JSONArray(song.tags)); put("local", song.local)
+        put("id", song.id)
+        put("title", song.title)
+        put("artist", song.artist)
+        put("album", song.album)
+        put("url", song.url)
+        put("licenseUrl", song.licenseUrl)
+        put("tags", JSONArray(song.tags))
+        put("local", song.local)
+        put("source", song.source)
+        put("durationMs", song.durationMs)
+        put("artworkUrl", song.artworkUrl)
+        put("sourcePageUrl", song.sourcePageUrl)
+        put("licenseName", song.licenseName)
     }
 
     private fun jsonToSong(item: JSONObject) = Song(
-        id = item.optString("id"), title = item.optString("title"), artist = item.optString("artist"),
-        album = item.optString("album"), url = item.optString("url"), licenseUrl = item.optString("licenseUrl"),
-        tags = jsonArrayToStrings(item.optJSONArray("tags")), local = item.optBoolean("local", false)
+        id = item.optString("id"),
+        title = item.optString("title"),
+        artist = item.optString("artist"),
+        album = item.optString("album"),
+        url = item.optString("url"),
+        licenseUrl = item.optString("licenseUrl"),
+        tags = jsonArrayToStrings(item.optJSONArray("tags")),
+        local = item.optBoolean("local", false),
+        source = item.optString("source"),
+        durationMs = item.optLong("durationMs", 0L),
+        artworkUrl = item.optString("artworkUrl"),
+        sourcePageUrl = item.optString("sourcePageUrl"),
+        licenseName = item.optString("licenseName")
     )
 
     private fun jsonArrayToStrings(array: JSONArray?): List<String> {
