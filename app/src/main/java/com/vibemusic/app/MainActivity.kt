@@ -58,6 +58,8 @@ class MainActivity : ComponentActivity() {
     private val results = mutableStateListOf<Song>()
     private val favorites = mutableStateListOf<Song>()
     private var query by mutableStateOf("")
+    private var searchScope by mutableStateOf(SearchScope.ALL)
+    private val recentSearches = mutableStateListOf<String>()
     private var tab by mutableIntStateOf(0)
     private var libraryFilter by mutableIntStateOf(0)
     private var showPlayer by mutableStateOf(false)
@@ -86,6 +88,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         favorites.addAll(store.favorites())
+        recentSearches.addAll(store.searchHistory())
         val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
         volume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / maxVolume
         val token = SessionToken(this, ComponentName(this, MusicPlaybackService::class.java))
@@ -223,31 +226,93 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun HomeScreen() {
-        Column(Modifier.fillMaxSize().padding(horizontal=20.dp)) {
-            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(
-                androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(0xFF3C2A60), Color(0xFF201D31)))
-            ).clickable { tab=1 }.padding(20.dp)) {
-                Column {
-                    Text("ТВОЙ ЗВУК. ТВОЁ НАСТРОЕНИЕ.", color=Purple, style=MaterialTheme.typography.labelMedium, fontWeight=FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Text("Что хочешь\nпослушать?", color=White, style=MaterialTheme.typography.headlineMedium, fontWeight=FontWeight.ExtraBold)
-                    Spacer(Modifier.height(16.dp))
-                    Row(verticalAlignment=Alignment.CenterVertically) {
-                        Icon(Icons.Default.Search, null, tint=Ink)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Искать музыку", color=Ink, fontWeight=FontWeight.Bold)
+        Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("AURALIS SOUND LAB", color = Purple, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.ExtraBold)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Звук, который
+попадает в настроение", color = White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
+                }
+                Box(
+                    Modifier.size(72.dp).clip(CircleShape).background(
+                        androidx.compose.ui.graphics.Brush.radialGradient(
+                            listOf(Color(0xFF8061C7), Color(0xFF302344), Color(0xFF171720))
+                        )
+                    ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.GraphicEq, null, tint = Purple, modifier = Modifier.size(42.dp))
+                }
+            }
+
+            Box(
+                Modifier.fillMaxWidth().height(190.dp).clip(RoundedCornerShape(28.dp))
+                    .background(
+                        androidx.compose.ui.graphics.Brush.linearGradient(
+                            listOf(Color(0xFF6847B7), Color(0xFF302447), Color(0xFF191821))
+                        )
+                    ).clickable { tab = 1 }.padding(20.dp)
+            ) {
+                Icon(
+                    Icons.Default.Equalizer,
+                    null,
+                    tint = Color(0x447F67B8),
+                    modifier = Modifier.size(132.dp).align(Alignment.CenterEnd)
+                )
+                Column(Modifier.fillMaxWidth(0.78f).align(Alignment.CenterStart)) {
+                    Text("ТВОЯ СЛЕДУЮЩАЯ ЛЮБИМАЯ ПЕСНЯ", color = Color(0xFFE5D9FF), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(9.dp))
+                    Text("Включай
+свою волну", color = White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
+                    Spacer(Modifier.height(14.dp))
+                    Row(
+                        Modifier.clip(RoundedCornerShape(50.dp)).background(Purple).padding(horizontal = 15.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Search, null, tint = Ink, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(7.dp))
+                        Text("Открыть поиск", color = Ink, fontWeight = FontWeight.Bold)
                     }
                 }
             }
-            Spacer(Modifier.height(22.dp))
-            Row(verticalAlignment=Alignment.CenterVertically) {
-                Text("Недавно слушал", style=MaterialTheme.typography.titleLarge, color=White, fontWeight=FontWeight.Bold, modifier=Modifier.weight(1f))
-                TextButton(onClick={tab=3; libraryFilter=1}) { Text("Вся история", color=Purple) }
+
+            Spacer(Modifier.height(18.dp))
+            Text("Быстрый старт", color = White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(7.dp))
+            listOf("Lo-fi", "Rock", "Pop", "Classical").chunked(2).forEach { pair ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    pair.forEach { term ->
+                        SuggestionChip(
+                            onClick = { query = term; searchScope = SearchScope.ALL; tab = 1; searchMusic(term) },
+                            label = { Text(term, maxLines = 1) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Недавно слушал", style = MaterialTheme.typography.titleLarge, color = White, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                TextButton(onClick = { tab = 3; libraryFilter = 1 }) { Text("Вся история", color = Purple) }
             }
             val recent = store.history().take(8)
-            if (recent.isEmpty()) EmptyState("История пока пуста", "Запусти трек — он появится здесь", Icons.Default.History)
-            else LazyColumn(verticalArrangement=Arrangement.spacedBy(8.dp), contentPadding=PaddingValues(bottom=12.dp)) {
-                items(recent, key={it.id}) { song -> SongRow(song, onPlay={playSong(song)}, onFavorite={toggleFavorite(song)}, onAdd={addSongToPlaylist=song}) }
+            if (recent.isEmpty()) {
+                EmptyState("История пока пуста", "Найди трек или импортируй музыку с устройства", Icons.Default.History)
+            } else {
+                LazyColumn(
+                    Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(bottom = 12.dp)
+                ) {
+                    items(recent, key = { it.id }) { song ->
+                        SongRow(song, onPlay = { playSong(song) }, onFavorite = { toggleFavorite(song) }, onAdd = { addSongToPlaylist = song })
+                    }
+                }
             }
         }
     }
@@ -255,60 +320,140 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun SearchScreen() {
         val suggestions = remember(query, results.size) { buildSuggestions(query) }
-        Column(Modifier.fillMaxSize().padding(horizontal=20.dp)) {
-            Text("Поиск понимает варианты написания", color=Soft, style=MaterialTheme.typography.bodyMedium)
+        val scopes = listOf(SearchScope.ALL, SearchScope.TITLE, SearchScope.ARTIST)
+
+        Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
+            Text("ПОИСК ПО КАТАЛОГУ", color = Purple, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.ExtraBold)
+            Text("Найди именно то, что ищешь", color = White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(12.dp))
+
             OutlinedTextField(
-                value=query, onValueChange={query=it},
-                modifier=Modifier.fillMaxWidth(),
-                placeholder={Text("Например, Майкл Джексон")},
-                leadingIcon={Icon(Icons.Default.Search, null, tint=Purple)},
-                trailingIcon={
-                    Row(verticalAlignment=Alignment.CenterVertically) {
-                        if (query.isNotEmpty()) IconButton(onClick={query=""}) { Icon(Icons.Default.Close, "Очистить") }
-                        IconButton(onClick={searchMusic()}, enabled=!loading) {
-                            if (loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth=2.dp)
-                            else Icon(Icons.Default.ArrowForward, "Искать", tint=Purple)
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Название песни или исполнитель") },
+                leadingIcon = { Icon(Icons.Default.Search, null, tint = Purple) },
+                trailingIcon = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = { query = ""; results.clear(); message = "Введи название трека или исполнителя" }) {
+                                Icon(Icons.Default.Close, "Очистить")
+                            }
+                        }
+                        IconButton(onClick = { searchMusic() }, enabled = !loading) {
+                            if (loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            else Icon(Icons.Default.ArrowForward, "Искать", tint = Purple)
                         }
                     }
                 },
-                singleLine=true, shape=RoundedCornerShape(18.dp)
+                singleLine = true,
+                shape = RoundedCornerShape(20.dp)
             )
+
+            Spacer(Modifier.height(9.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                scopes.forEach { scope ->
+                    FilterChip(
+                        selected = searchScope == scope,
+                        onClick = {
+                            searchScope = scope
+                            if (query.isNotBlank() && !loading) searchMusic()
+                        },
+                        enabled = !loading,
+                        label = { Text(scope.label) }
+                    )
+                }
+            }
+            Text(
+                "Фильтры: artist:имя · track:название · genre:rock · year:2003",
+                color = Soft,
+                style = MaterialTheme.typography.bodySmall
+            )
+            Spacer(Modifier.height(9.dp))
+
             if (query.isNotBlank() && suggestions.isNotEmpty()) {
+                Text("Варианты написания", color = Soft, style = MaterialTheme.typography.labelMedium)
+                Spacer(Modifier.height(4.dp))
+                suggestions.forEach { suggestion ->
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                            .clickable { query = suggestion; searchMusic(suggestion) }
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, null, tint = Purple, modifier = Modifier.size(17.dp))
+                        Spacer(Modifier.width(9.dp))
+                        Text(suggestion, color = White, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Icon(Icons.Default.NorthWest, null, tint = Soft, modifier = Modifier.size(16.dp))
+                    }
+                }
+                Spacer(Modifier.height(5.dp))
+            }
+
+            if (query.isBlank() && results.isEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Недавние запросы", color = White, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    if (recentSearches.isNotEmpty()) {
+                        TextButton(onClick = { store.clearSearchHistory(); recentSearches.clear() }) {
+                            Text("Очистить", color = Purple)
+                        }
+                    }
+                }
+                if (recentSearches.isEmpty()) {
+                    Text("Здесь появятся твои последние поиски.", color = Soft, style = MaterialTheme.typography.bodySmall)
+                } else {
+                    recentSearches.take(6).chunked(2).forEach { pair ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                            pair.forEach { term ->
+                                SuggestionChip(
+                                    onClick = { query = term; searchMusic(term) },
+                                    label = { Text(term, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+                }
                 Spacer(Modifier.height(10.dp))
-                Text("Возможно, ты ищешь", color=Soft, style=MaterialTheme.typography.labelMedium)
-                Spacer(Modifier.height(6.dp))
-                Column(verticalArrangement=Arrangement.spacedBy(4.dp)) {
-                    suggestions.forEach { suggestion ->
-                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { query=suggestion; searchMusic() }.padding(horizontal=10.dp, vertical=8.dp), verticalAlignment=Alignment.CenterVertically) {
-                            Icon(Icons.Default.Search, null, tint=Purple, modifier=Modifier.size(18.dp))
-                            Spacer(Modifier.width(10.dp))
-                            Text(suggestion, color=White, modifier=Modifier.weight(1f))
-                            Icon(Icons.Default.NorthWest, null, tint=Soft, modifier=Modifier.size(16.dp))
-                        }
-                    }
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            if (query.isBlank()) {
-                Text("Популярные запросы", color=Soft, style=MaterialTheme.typography.labelMedium)
-                Spacer(Modifier.height(8.dp))
-                val popular = listOf("Michael Jackson", "Billie Jean", "The Weeknd", "Linkin Park", "Классическая музыка")
-                popular.chunked(2).forEach { pair ->
-                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                Text("Попробуй найти", color = White, fontWeight = FontWeight.Bold)
+                listOf("Billie Jean", "Linkin Park", "Lo-fi beats", "Classical piano").chunked(2).forEach { pair ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                         pair.forEach { term ->
-                            SuggestionChip(onClick={query=term; searchMusic()}, label={Text(term)}, modifier=Modifier.weight(1f))
+                            SuggestionChip(
+                                onClick = { query = term; searchMusic(term) },
+                                label = { Text(term, maxLines = 1) },
+                                modifier = Modifier.weight(1f)
+                            )
                         }
                     }
                 }
-                Spacer(Modifier.height(14.dp))
             }
-            Text(message, color=Soft, style=MaterialTheme.typography.bodySmall, modifier=Modifier.padding(bottom=8.dp))
+
+            if (loading) {
+                Spacer(Modifier.height(8.dp))
+                LinearProgressIndicator(Modifier.fillMaxWidth(), color = Purple, trackColor = PanelRaised)
+            }
+            Text(message, color = Soft, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 7.dp))
+
             if (results.isEmpty()) {
-                if (query.isBlank()) EmptyState("Найди свой следующий трек", "Можно искать по названию, исполнителю или части слов", Icons.Default.MusicNote)
+                if (query.isBlank()) {
+                    EmptyState("Музыка начинается с поиска", "Ищи по названию, исполнителю или части слов", Icons.Default.MusicNote)
+                } else if (!loading) {
+                    EmptyState("Совпадений пока нет", "Попробуй другое написание или поиск по исполнителю", Icons.Default.ManageSearch)
+                }
             } else {
-                LazyColumn(Modifier.weight(1f), verticalArrangement=Arrangement.spacedBy(8.dp), contentPadding=PaddingValues(bottom=16.dp)) {
-                    items(results.toList(), key={it.id}) { song -> SongRow(song, onPlay={playSong(song)}, onFavorite={toggleFavorite(song)}, onAdd={addSongToPlaylist=song}) }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 7.dp)) {
+                    Text("Результаты", color = White, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    Text("${results.size} треков", color = Purple, style = MaterialTheme.typography.labelMedium)
+                }
+                LazyColumn(
+                    Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(bottom = 16.dp)
+                ) {
+                    items(results.toList(), key = { it.id }) { song ->
+                        SongRow(song, onPlay = { playSong(song) }, onFavorite = { toggleFavorite(song) }, onAdd = { addSongToPlaylist = song })
+                    }
                 }
             }
         }
@@ -422,7 +567,8 @@ class MainActivity : ComponentActivity() {
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).background(Panel).padding(18.dp)) {
                 Text("О приложении", color=White, fontWeight=FontWeight.SemiBold)
                 Spacer(Modifier.height(6.dp))
-                Text("Auralis · 0.2.0", color=Purple)
+                val installedVersion = remember { runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "0.1.0" }
+                Text("Auralis · $installedVersion", color=Purple)
                 Text("Музыкальный плеер с поиском открытых аудиозаписей и локальных файлов.", color=Soft, style=MaterialTheme.typography.bodySmall)
             }
             Spacer(Modifier.height(20.dp))
@@ -536,20 +682,37 @@ class MainActivity : ComponentActivity() {
         return (fromLibrary + variants.filterNot { it.equals(q, ignoreCase=true) }).distinct().take(4)
     }
 
-    private fun searchMusic() {
-        val text = query.trim()
-        if (text.isBlank()) { message="Введи название трека или исполнителя"; return }
+    private fun searchMusic(searchText: String = query) {
+        val text = searchText.trim()
+        if (text.isBlank()) {
+            message = "Введи название трека или исполнителя"
+            return
+        }
+        val selectedScope = searchScope
+        query = text
         lifecycleScope.launch {
-            loading=true; message="Ищем варианты написания…"
-            runCatching { archive.search(text) }
+            loading = true
+            message = "Ищем совпадения в каталоге…"
+            results.clear()
+            store.addSearchQuery(text)
+            recentSearches.clear()
+            recentSearches.addAll(store.searchHistory())
+            runCatching { archive.search(text, selectedScope) }
                 .onSuccess { songs ->
-                    results.clear(); results.addAll(songs)
+                    results.clear()
+                    results.addAll(songs)
                     songs.forEach(store::saveSong)
-                    message=if(songs.isEmpty()) "Ничего не найдено. Попробуй другое написание." else "Найдено треков: ${songs.size}"
-                    tab=1
+                    message = if (songs.isEmpty()) {
+                        "Ничего не найдено. Попробуй короче или измени фильтр."
+                    } else {
+                        "Найдено совпадений: ${songs.size}"
+                    }
+                    tab = 1
                 }
-                .onFailure { message=it.message ?: "Не удалось выполнить поиск" }
-            loading=false
+                .onFailure {
+                    message = it.message ?: "Не удалось выполнить поиск"
+                }
+            loading = false
         }
     }
 
