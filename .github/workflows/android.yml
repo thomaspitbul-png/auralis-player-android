@@ -6,7 +6,7 @@ on:
     branches: [main, master]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -42,3 +42,15 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+      - name: Publish APK to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.0.${{ github.run_number }}
+          name: Auralis v0.0.${{ github.run_number }}
+          body: |
+            Автоматическая сборка Auralis для Android.
+
+            Установочный APK прикреплён к этому релизу.
+          files: app/build/outputs/apk/debug/app-debug.apk
+          generate_release_notes: true
+          make_latest: true
