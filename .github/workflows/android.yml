@@ -1,5 +1,9 @@
 name: Build Auralis debug APK
 
+concurrency:
+  group: auralis-android-build
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   push:
@@ -33,18 +37,33 @@ jobs:
           yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
           "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
           printf 'sdk.dir=%s\n' "$SDK_ROOT" > local.properties
+      - name: Restore persistent Android signing key
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.android/debug.keystore
+            ~/.android/auralis-cert.sha256
+          key: auralis-android-debug-keystore-v1
+
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
 
-      - name: Verify APK signing certificate
-        env:
-          EXPECTED_CERT_SHA256: 86abdeb55c6f972157b3ec1a84c0b2d03f362a4ad3bf09653f75a35c2c004cf9
+      - name: Verify and pin APK signing certificate
         run: |
           APK="app/build/outputs/apk/debug/app-debug.apk"
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          "$APKSIGNER" verify "$APK"
           ACTUAL_CERT_SHA256="$("$APKSIGNER" verify --print-certs "$APK" | grep -m1 'certificate SHA-256 digest:' | awk '{print tolower($NF)}')"
-          echo "APK signing certificate: $ACTUAL_CERT_SHA256"
-          test "$ACTUAL_CERT_SHA256" = "$EXPECTED_CERT_SHA256"
+          test -n "$ACTUAL_CERT_SHA256"
+          mkdir -p "$HOME/.android"
+          if [ -f "$HOME/.android/auralis-cert.sha256" ]; then
+            EXPECTED_CERT_SHA256="$(cat "$HOME/.android/auralis-cert.sha256")"
+            echo "Cached signing certificate: $EXPECTED_CERT_SHA256"
+            test "$ACTUAL_CERT_SHA256" = "$EXPECTED_CERT_SHA256"
+          else
+            echo "$ACTUAL_CERT_SHA256" > "$HOME/.android/auralis-cert.sha256"
+            echo "Created persistent signing certificate: $ACTUAL_CERT_SHA256"
+          fi
 
       - name: Prepare versioned release APK
         run: |
