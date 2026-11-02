@@ -267,7 +267,7 @@ class MainActivity : ComponentActivity() {
                 trailingIcon={
                     Row(verticalAlignment=Alignment.CenterVertically) {
                         if (query.isNotEmpty()) IconButton(onClick={query=""}) { Icon(Icons.Default.Close, "Очистить") }
-                        IconButton(onClick={::searchMusic, enabled=!loading}) {
+                        IconButton(onClick={searchMusic()}, enabled=!loading) {
                             if (loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth=2.dp)
                             else Icon(Icons.Default.ArrowForward, "Искать", tint=Purple)
                         }
