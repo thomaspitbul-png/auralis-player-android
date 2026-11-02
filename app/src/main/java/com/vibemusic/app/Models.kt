@@ -11,7 +11,7 @@ data class Song(
     val local: Boolean = false
 ) {
     val sourceLabel: String
-        get() = if (local) "На устройстве" else "Internet Archive"
+        get() = when { local -> "На устройстве"; id.startsWith("itunes_") -> "Apple Music · предпрослушивание"; else -> "Internet Archive" }
 }
 
 data class MusicPlaylist(
