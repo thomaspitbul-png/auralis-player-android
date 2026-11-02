@@ -8,48 +8,122 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.text.Normalizer
+
+enum class SearchScope(val label: String) {
+    ALL("Всё"),
+    TITLE("Треки"),
+    ARTIST("Исполнители"),
+    SUBJECT("Жанры")
+}
 
 class ArchiveRepository {
-    suspend fun search(query: String, bySubject: Boolean = false): List<Song> = withContext(Dispatchers.IO) {
-        val clean = query.trim().take(100)
-        require(clean.isNotBlank()) { "Введи название трека или исполнителя" }
-        val variants = (listOf(clean) + suggestionsFor(clean)).map { it.trim() }
-            .filter { it.isNotBlank() }.distinct().take(5)
-        val clauses = variants.flatMap { variant ->
-            val safe = variant.replace("\\", " ").replace("\"", " ").replace("(", " ").replace(")", " ").trim()
-            if (safe.isBlank()) emptyList() else if (bySubject) {
-                listOf("subject:(\"$safe\")")
-            } else {
-                val fields = listOf("title", "creator", "subject").map { "$it:(\"$safe\")" }
-                val words = safe.split(Regex("\\s+")).filter { it.length >= 3 }.take(5)
-                val wordClauses = if (words.size >= 2) {
-                    listOf("title:(" + words.joinToString(" AND ") { it.replace(":", " ") } + ")",
-                        "creator:(" + words.joinToString(" AND ") { it.replace(":", " ") } + ")")
-                } else emptyList()
-                fields + wordClauses
+    suspend fun search(query: String, scope: SearchScope = SearchScope.ALL): List<Song> =
+        withContext(Dispatchers.IO) {
+            val parsed = parseSearch(query, scope)
+            val clean = parsed.term.trim().take(100)
+            require(clean.isNotBlank()) { "Введи название трека или исполнителя" }
+
+            val variants = (listOf(clean) + suggestionsFor(clean))
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .take(5)
+
+            val fields = when (parsed.scope) {
+                SearchScope.TITLE -> listOf("title")
+                SearchScope.ARTIST -> listOf("creator")
+                SearchScope.SUBJECT -> listOf("subject")
+                SearchScope.ALL -> listOf("title", "creator", "subject")
             }
-        }.distinct().take(24)
-        val expression = "mediatype:audio AND licenseurl:* AND (" + clauses.joinToString(" OR ") + ")"
-        val requestUrl = "https://archive.org/advancedsearch.php?q=${enc(expression)}&fl[]=${enc("identifier")}" +
-            "&fl[]=${enc("title")}&fl[]=${enc("creator")}&fl[]=${enc("year")}" +
-            "&fl[]=${enc("subject")}&fl[]=${enc("licenseurl")}&rows=40&page=1&output=json"
-        val root = JSONObject(httpGet(requestUrl))
-        val docs = root.optJSONObject("response")?.optJSONArray("docs") ?: JSONArray()
-        val songs = ArrayList<Song>(docs.length())
-        for (i in 0 until docs.length()) {
-            val doc = docs.optJSONObject(i) ?: continue
-            val id = doc.optString("identifier").takeIf { it.isNotBlank() } ?: continue
-            songs += Song(
-                id = id,
-                title = doc.optString("title").ifBlank { "Без названия" },
-                artist = readText(doc.opt("creator")).ifBlank { "Неизвестный исполнитель" },
-                album = doc.optString("year"),
-                licenseUrl = doc.optString("licenseurl"),
-                tags = readList(doc.opt("subject")).take(8)
-            )
+
+            val queries = linkedSetOf<String>()
+            variants.forEach { variant ->
+                val safe = cleanLuceneText(variant)
+                if (safe.isBlank()) return@forEach
+                val exactFields = fields.map { "$it:(\"$safe\")" }
+                queries += buildArchiveQuery(exactFields, parsed.year)
+
+                val words = safe.split(Regex("\\s+")).filter { it.length >= 2 }.distinct().take(6)
+                if (words.size >= 2 && queries.size < 4) {
+                    val andFields = fields.map { field ->
+                        "$field:(" + words.joinToString(" AND ") { "\"$it\"" } + ")"
+                    }
+                    queries += buildArchiveQuery(andFields, parsed.year)
+                }
+            }
+
+            val baseWords = cleanLuceneText(clean)
+                .split(Regex("\\s+"))
+                .filter { it.length >= 2 }
+                .distinct()
+                .take(5)
+            if (baseWords.size >= 2 && queries.size < 5) {
+                val looseFields = fields.map { field ->
+                    "$field:(" + baseWords.joinToString(" OR ") { "\"$it\"" } + ")"
+                }
+                queries += buildArchiveQuery(looseFields, parsed.year)
+            }
+
+            val found = LinkedHashMap<String, Candidate>()
+            var successfulRequests = 0
+            var lastError: Throwable? = null
+
+            for (expression in queries.take(5)) {
+                val requestUrl = buildRequestUrl(expression)
+                val response = runCatching { JSONObject(httpGet(requestUrl)) }
+                if (response.isFailure) {
+                    lastError = response.exceptionOrNull()
+                    continue
+                }
+                successfulRequests++
+
+                val docs = response.getOrThrow()
+                    .optJSONObject("response")
+                    ?.optJSONArray("docs") ?: JSONArray()
+
+                for (index in 0 until docs.length()) {
+                    val doc = docs.optJSONObject(index) ?: continue
+                    val id = doc.optString("identifier").takeIf { it.isNotBlank() } ?: continue
+                    val license = doc.optString("licenseurl").trim()
+                    if (license.isBlank()) continue
+
+                    val song = Song(
+                        id = id,
+                        title = doc.optString("title").ifBlank { "Без названия" },
+                        artist = readText(doc.opt("creator")).ifBlank { "Неизвестный исполнитель" },
+                        album = doc.optString("year"),
+                        licenseUrl = license,
+                        tags = readList(doc.opt("subject")).take(8)
+                    )
+                    val candidate = Candidate(
+                        song = song,
+                        relevance = relevanceScore(song, clean),
+                        downloads = doc.optLong("downloads", 0L)
+                    )
+                    val previous = found[id]
+                    if (previous == null || candidate.relevance > previous.relevance) {
+                        found[id] = candidate
+                    }
+                }
+                if (found.size >= 60) break
+            }
+
+            if (successfulRequests == 0 && lastError != null) {
+                throw IllegalStateException(
+                    lastError.message ?: "Не удалось связаться с музыкальным каталогом",
+                    lastError
+                )
+            }
+
+            found.values
+                .sortedWith(
+                    compareByDescending<Candidate> { it.relevance }
+                        .thenByDescending { it.downloads }
+                )
+                .take(60)
+                .map { it.song }
         }
-        songs.distinctBy { it.id }
-    }
 
     suspend fun resolveStream(song: Song): Song = withContext(Dispatchers.IO) {
         if (song.local || song.url.isNotBlank()) return@withContext song
@@ -82,11 +156,89 @@ class ArchiveRepository {
 
     fun itemPage(song: Song): String = "https://archive.org/details/${enc(song.id)}"
 
+    private fun buildArchiveQuery(fieldQueries: List<String>, year: String?): String {
+        val filters = buildList {
+            add("mediatype:audio")
+            add("licenseurl:*")
+            if (!year.isNullOrBlank()) add("year:$year")
+        }
+        return filters.joinToString(" AND ") + " AND (" + fieldQueries.joinToString(" OR ") + ")"
+    }
+
+    private fun buildRequestUrl(expression: String): String {
+        val fields = listOf("identifier", "title", "creator", "year", "subject", "licenseurl", "downloads")
+        val fieldParams = fields.joinToString("") { "&fl[]=${enc(it)}" }
+        return "https://archive.org/advancedsearch.php?q=${enc(expression)}" +
+            fieldParams +
+            "&sort[]=${enc("downloads desc")}&rows=60&page=1&output=json"
+    }
+
+    private fun parseSearch(raw: String, defaultScope: SearchScope): ParsedSearch {
+        var term = raw.trim()
+        var scope = defaultScope
+        val prefix = Regex(
+            "^(artist|исполнитель|track|title|трек|genre|жанр):\\s*",
+            RegexOption.IGNORE_CASE
+        ).find(term)
+
+        if (prefix != null) {
+            scope = when (prefix.groupValues[1].lowercase()) {
+                "artist", "исполнитель" -> SearchScope.ARTIST
+                "genre", "жанр" -> SearchScope.SUBJECT
+                else -> SearchScope.TITLE
+            }
+            term = term.substring(prefix.range.last + 1).trim()
+        }
+
+        val yearMatch = Regex("\\byear:(\\d{4})\\b", RegexOption.IGNORE_CASE).find(term)
+        val year = yearMatch?.groupValues?.getOrNull(1)
+        if (yearMatch != null) term = term.replace(yearMatch.value, " ").trim()
+
+        return ParsedSearch(term, scope, year)
+    }
+
+    private fun cleanLuceneText(value: String): String =
+        value.replace("\\", " ")
+            .replace("\"", " ")
+            .replace("(", " ")
+            .replace(")", " ")
+            .replace(":", " ")
+            .replace("*", " ")
+            .replace("?", " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+    private fun relevanceScore(song: Song, query: String): Int {
+        val q = normalizeForMatch(query)
+        val title = normalizeForMatch(song.title)
+        val artist = normalizeForMatch(song.artist)
+        val all = "$title $artist ${song.tags.joinToString(" ").let(::normalizeForMatch)}"
+        var score = 0
+
+        if (title == q) score += 1200
+        else if (title.contains(q)) score += 900
+        if (artist == q) score += 850
+        else if (artist.contains(q)) score += 700
+
+        val words = q.split(' ').filter { it.length >= 2 }.distinct()
+        val matched = words.count { word -> word in all }
+        score += matched * 110
+        if (words.isNotEmpty() && matched == words.size) score += 180
+        return score
+    }
+
+    private fun normalizeForMatch(value: String): String =
+        Normalizer.normalize(value.lowercase(), Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+            .replace(Regex("[^\\p{L}\\p{N}]+"), " ")
+            .trim()
+            .replace(Regex("\\s+"), " ")
+
     private fun httpGet(address: String): String {
         val connection = (URL(address).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
-            connectTimeout = 15000
-            readTimeout = 20000
+            connectTimeout = 12000
+            readTimeout = 16000
             setRequestProperty("User-Agent", "AuralisAndroid/0.2")
             setRequestProperty("Accept", "application/json")
         }
@@ -96,20 +248,27 @@ class ArchiveRepository {
             val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             if (code !in 200..299) throw IllegalStateException("Сервис ответил кодом $code")
             return body
-        } finally { connection.disconnect() }
+        } finally {
+            connection.disconnect()
+        }
     }
 
     private fun enc(value: String): String = URLEncoder.encode(value, Charsets.UTF_8.name())
+
     private fun readText(value: Any?): String = when (value) {
         is JSONArray -> (0 until value.length()).map { value.optString(it) }.joinToString(", ")
         is String -> value
         else -> ""
     }
+
     private fun readList(value: Any?): List<String> = when (value) {
         is JSONArray -> (0 until value.length()).map { value.optString(it) }.filter { it.isNotBlank() }
         is String -> value.split(Regex("[,;]")).map { it.trim() }.filter { it.isNotBlank() }
         else -> emptyList()
     }
+
+    private data class ParsedSearch(val term: String, val scope: SearchScope, val year: String?)
+    private data class Candidate(val song: Song, val relevance: Int, val downloads: Long)
 
     companion object {
         private val knownVariants = mapOf(
@@ -127,17 +286,29 @@ class ArchiveRepository {
             "эд шеран" to listOf("Ed Sheeran"),
             "билли айлиш" to listOf("Billie Eilish"),
             "дрэке" to listOf("Drake"),
-            "дрейк" to listOf("Drake")
+            "дрейк" to listOf("Drake"),
+            "майли сайрус" to listOf("Miley Cyrus"),
+            "бруно марс" to listOf("Bruno Mars"),
+            "дэвид гетта" to listOf("David Guetta"),
+            "авичи" to listOf("Avicii"),
+            "имэджин дрэгонс" to listOf("Imagine Dragons")
         )
 
         fun suggestionsFor(query: String): List<String> {
             val clean = query.trim()
             if (clean.isBlank()) return emptyList()
-            val key = clean.lowercase().replace(Regex("[^\\p{L}\\p{N} ]"), " ").replace(Regex("\\s+"), " ").trim()
+            val key = clean.lowercase()
+                .replace(Regex("[^\\p{L}\\p{N} ]"), " ")
+                .replace(Regex("\\s+"), " ")
+                .trim()
             val known = knownVariants[key].orEmpty()
             val latin = transliterate(key)
-            val plain = clean.split(Regex("\\s+")).filter { it.length > 2 }.joinToString(" ")
-            return (known + listOf(latin, plain).filter { it.isNotBlank() && !it.equals(clean, true) }).distinct().take(4)
+            val plain = clean.split(Regex("\\s+"))
+                .filter { it.length > 2 }
+                .joinToString(" ")
+            return (known + listOf(latin, plain).filter {
+                it.isNotBlank() && !it.equals(clean, true)
+            }).distinct().take(4)
         }
 
         private fun transliterate(value: String): String {
