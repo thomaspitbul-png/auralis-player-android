@@ -182,7 +182,7 @@ class MainActivity : ComponentActivity() {
                         title={Text("Добавить в плейлист")},
                         text={
                             if (playlists.isEmpty()) Text("Сначала создай плейлист во вкладке «Плейлисты».")
-                            else Column(verticalScroll(rememberScrollState())) {
+                            else Column(Modifier.verticalScroll(rememberScrollState())) {
                                 playlists.forEach { playlist ->
                                     TextButton(onClick={
                                         store.addToPlaylist(song, playlist.id)
@@ -230,8 +230,7 @@ class MainActivity : ComponentActivity() {
                 Column {
                     Text("ТВОЙ ЗВУК. ТВОЁ НАСТРОЕНИЕ.", color=Purple, style=MaterialTheme.typography.labelMedium, fontWeight=FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
-                    Text("Что хочешь
-послушать?", color=White, style=MaterialTheme.typography.headlineMedium, fontWeight=FontWeight.ExtraBold)
+                    Text("Что хочешь\\nпослушать?", color=White, style=MaterialTheme.typography.headlineMedium, fontWeight=FontWeight.ExtraBold)
                     Spacer(Modifier.height(16.dp))
                     Row(verticalAlignment=Alignment.CenterVertically) {
                         Icon(Icons.Default.Search, null, tint=Ink)
