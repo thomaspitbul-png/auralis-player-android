@@ -37,6 +37,19 @@ class MusicStore(context: Context) {
     }
 
     @Synchronized fun history(): List<Song> = readIds("history").mapNotNull { getSong(it) }
+
+    @Synchronized fun addSearchQuery(query: String) {
+        val clean = query.trim().take(100)
+        if (clean.isBlank()) return
+        val recent = listOf(clean) + readIds("search_history").filterNot { it.equals(clean, ignoreCase = true) }
+        writeIds("search_history", recent.take(8))
+    }
+
+    @Synchronized fun searchHistory(): List<String> = readIds("search_history")
+
+    @Synchronized fun clearSearchHistory() {
+        writeIds("search_history", emptyList())
+    }
     @Synchronized fun localSongs(): List<Song> = allSongs().filter { it.local }
 
     @Synchronized fun playlists(): List<MusicPlaylist> {
