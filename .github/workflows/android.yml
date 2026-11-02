@@ -36,14 +36,28 @@ jobs:
           echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
           yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
           "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
-          printf 'sdk.dir=%s\n' "$SDK_ROOT" > local.properties
+          printf 'sdk.dir=%s\\n' "$SDK_ROOT" > local.properties
       - name: Restore persistent Android signing key
         uses: actions/cache@v4
         with:
           path: |
             ~/.android/debug.keystore
             ~/.android/auralis-cert.sha256
-          key: auralis-android-debug-keystore-v1
+          key: auralis-android-debug-keystore-v2
+
+      - name: Ensure persistent Android signing key exists
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -s "$HOME/.android/debug.keystore" ]; then
+            echo "No cached keystore found; generating a persistent signing key."
+            rm -f "$HOME/.android/auralis-cert.sha256"
+            keytool -genkeypair -noprompt -keystore "$HOME/.android/debug.keystore" \
+              -storepass android -alias androiddebugkey -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          else
+            echo "Using cached Android signing key."
+          fi
 
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
