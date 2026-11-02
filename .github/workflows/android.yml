@@ -17,6 +17,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
       - uses: android-actions/setup-android@v3
       - name: Install Android SDK
         run: |
@@ -24,7 +27,7 @@ jobs:
           sdkmanager "platforms;android-36" "build-tools;35.0.0"
           printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
       - name: Build debug APK
-        run: bash ./gradlew assembleDebug --no-daemon --stacktrace
+        run: gradle assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: Auralis-debug-apk
