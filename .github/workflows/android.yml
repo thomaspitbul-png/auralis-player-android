@@ -35,6 +35,20 @@ jobs:
           printf 'sdk.dir=%s\n' "$SDK_ROOT" > local.properties
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Verify APK signing certificate
+        env:
+          EXPECTED_CERT_SHA256: 86abdeb55c6f972157b3ec1a84c0b2d03f362a4ad3bf09653f75a35c2c004cf9
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          ACTUAL_CERT_SHA256="$("$APKSIGNER" verify --print-certs "$APK" | grep -m1 'certificate SHA-256 digest:' | awk '{print tolower($NF)}')"
+          echo "APK signing certificate: $ACTUAL_CERT_SHA256"
+          test "$ACTUAL_CERT_SHA256" = "$EXPECTED_CERT_SHA256"
+
+      - name: Prepare versioned release APK
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk "app/build/outputs/apk/debug/Auralis-0.2.${GITHUB_RUN_NUMBER}.apk"
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -45,12 +59,12 @@ jobs:
       - name: Publish APK to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.0.${{ github.run_number }}
-          name: Auralis v0.0.${{ github.run_number }}
+          tag_name: v0.2.${{ github.run_number }}
+          name: Auralis v0.2.${{ github.run_number }}
           body: |
             Автоматическая сборка Auralis для Android.
 
             Установочный APK прикреплён к этому релизу.
-          files: app/build/outputs/apk/debug/app-debug.apk
+          files: app/build/outputs/apk/debug/Auralis-0.2.${{ github.run_number }}.apk
           generate_release_notes: true
           make_latest: true
