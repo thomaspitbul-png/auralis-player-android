@@ -440,8 +440,7 @@ class AuralisActivity : ComponentActivity() {
                 Column(Modifier.fillMaxWidth(0.8f).align(Alignment.CenterStart)) {
                     Text("ОТКРЫТЫЕ МУЗЫКАЛЬНЫЕ КАТАЛОГИ", color = Color(0xFFE4D9FF), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(9.dp))
-                    Text("Найди трек
-и слушай целиком", color = AuralisText, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
+                    Text("Найди трек\nи слушай целиком", color = AuralisText, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.height(11.dp))
                     Text("Перейти к поиску  →", color = AuralisBg, fontWeight = FontWeight.Bold,
                         modifier = Modifier.clip(CircleShape).background(AuralisAccent).padding(horizontal = 14.dp, vertical = 8.dp))
