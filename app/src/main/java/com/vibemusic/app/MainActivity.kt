@@ -234,8 +234,7 @@ class MainActivity : ComponentActivity() {
                 Column(Modifier.weight(1f)) {
                     Text("AURALIS SOUND LAB", color = Purple, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.height(4.dp))
-                    Text("Звук, который
-попадает в настроение", color = White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
+                    Text("Звук, который\nпопадает в настроение", color = White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.ExtraBold)
                 }
                 Box(
                     Modifier.size(72.dp).clip(CircleShape).background(
@@ -266,8 +265,7 @@ class MainActivity : ComponentActivity() {
                 Column(Modifier.fillMaxWidth(0.78f).align(Alignment.CenterStart)) {
                     Text("ТВОЯ СЛЕДУЮЩАЯ ЛЮБИМАЯ ПЕСНЯ", color = Color(0xFFE5D9FF), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(9.dp))
-                    Text("Включай
-свою волну", color = White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
+                    Text("Включай\nсвою волну", color = White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.height(14.dp))
                     Row(
                         Modifier.clip(RoundedCornerShape(50.dp)).background(Purple).padding(horizontal = 15.dp, vertical = 9.dp),
