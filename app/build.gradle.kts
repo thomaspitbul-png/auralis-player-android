@@ -4,6 +4,12 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+val appBuildNumber = providers.gradleProperty("APP_VERSION_CODE")
+    .orElse(providers.environmentVariable("GITHUB_RUN_NUMBER"))
+    .orElse("13")
+    .get()
+    .toInt()
+
 android {
     namespace = "com.vibemusic.app"
     compileSdk = 36
@@ -11,8 +17,8 @@ android {
         applicationId = "com.vibemusic.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appBuildNumber
+        versionName = "0.2.$appBuildNumber"
     }
     buildFeatures { compose = true }
     compileOptions {
