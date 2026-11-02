@@ -127,7 +127,7 @@ class MusicCatalogRepository {
             val safe = cleanLuceneText(variant)
             if (safe.isBlank()) null
             else {
-                val exact = fields.joinToString(" OR ") { "$it:(\\"$safe\\")" }
+                val exact = fields.joinToString(" OR ") { """$it:("$safe")""" }
                 "mediatype:audio AND licenseurl:* AND ($exact)"
             }
         }.distinct()
@@ -241,13 +241,13 @@ class MusicCatalogRepository {
     }
 
     private fun cleanLuceneText(value: String): String =
-        value.replace("\\", " ")
-            .replace("\\"", " ")
-            .replace("(", " ")
-            .replace(")", " ")
-            .replace(":", " ")
-            .replace("*", " ")
-            .replace("?", " ")
+        value.replace('\\', ' ')
+            .replace('"', ' ')
+            .replace('(', ' ')
+            .replace(')', ' ')
+            .replace(':', ' ')
+            .replace('*', ' ')
+            .replace('?', ' ')
             .replace(Regex("\\s+"), " ")
             .trim()
 
