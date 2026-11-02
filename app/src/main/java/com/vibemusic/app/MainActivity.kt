@@ -584,6 +584,7 @@ class MainActivity : ComponentActivity() {
                 Text(song.title, color=White, fontWeight=FontWeight.SemiBold, maxLines=1, overflow=TextOverflow.Ellipsis)
                 Text(song.artist, color=Soft, style=MaterialTheme.typography.bodySmall, maxLines=1, overflow=TextOverflow.Ellipsis)
                 if (song.local) Text("На устройстве", color=Purple, style=MaterialTheme.typography.labelSmall)
+                else if (song.id.startsWith("itunes_")) Text("Apple Music · предпрослушивание", color=Purple, style=MaterialTheme.typography.labelSmall)
             }
             IconButton(onClick=onAdd) { Icon(Icons.Default.Add, "В плейлист", tint=Soft) }
             IconButton(onClick=onFavorite) {
@@ -697,13 +698,25 @@ class MainActivity : ComponentActivity() {
             recentSearches.addAll(store.searchHistory())
             runCatching { archive.search(text, selectedScope) }
                 .onSuccess { songs ->
+                    val normalized = text.lowercase().trim()
+                    val localMatches = store.localSongs().filter { song ->
+                        val haystack = when (selectedScope) {
+                            SearchScope.TITLE -> song.title
+                            SearchScope.ARTIST -> song.artist
+                            SearchScope.SUBJECT -> song.tags.joinToString(" ")
+                            SearchScope.ALL -> "${song.title} ${song.artist} ${song.tags.joinToString(" ")}"
+                        }.lowercase()
+                        haystack.contains(normalized) || normalized.split(Regex("\\s+"))
+                            .filter { it.length >= 2 }.any { haystack.contains(it) }
+                    }
+                    val merged = (localMatches + songs).distinctBy { it.id }
                     results.clear()
-                    results.addAll(songs)
+                    results.addAll(merged)
                     songs.forEach(store::saveSong)
-                    message = if (songs.isEmpty()) {
-                        "Ничего не найдено. Попробуй короче или измени фильтр."
+                    message = if (merged.isEmpty()) {
+                        "Ничего не найдено. Попробуй другое написание или проверь подключение к интернету."
                     } else {
-                        "Найдено совпадений: ${songs.size}"
+                        "Найдено совпадений: ${merged.size} · онлайн и на устройстве"
                     }
                     tab = 1
                 }
