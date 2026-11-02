@@ -24,6 +24,11 @@ class ArchiveRepository {
             val clean = parsed.term.trim().take(100)
             require(clean.isNotBlank()) { "Введи название трека или исполнителя" }
 
+            // Prefer a real music catalog for mainstream songs; keep Internet Archive as fallback.
+            val catalogResults = runCatching { searchAppleCatalog(clean, parsed.scope) }
+                .getOrDefault(emptyList())
+            if (catalogResults.isNotEmpty()) return@withContext catalogResults
+
             val variants = (listOf(clean) + suggestionsFor(clean))
                 .map { it.trim() }
                 .filter { it.isNotBlank() }
@@ -124,6 +129,49 @@ class ArchiveRepository {
                 .take(60)
                 .map { it.song }
         }
+
+    private fun searchAppleCatalog(query: String, scope: SearchScope): List<Song> {
+        val attribute = when (scope) {
+            SearchScope.TITLE -> "&attribute=songTerm"
+            SearchScope.ARTIST -> "&attribute=artistTerm"
+            SearchScope.SUBJECT -> "&attribute=genreIndex"
+            SearchScope.ALL -> ""
+        }
+        val address = "https://itunes.apple.com/search?term=${enc(query)}&entity=song&media=music&country=US&limit=50$attribute"
+        val root = JSONObject(httpGet(address))
+        val array = root.optJSONArray("results") ?: JSONArray()
+        val songs = ArrayList<Pair<Int, Song>>()
+        val queryNormalized = normalizeForMatch(query)
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            val trackId = item.optLong("trackId", 0L)
+            val title = item.optString("trackName").trim()
+            val artist = item.optString("artistName").trim()
+            val preview = item.optString("previewUrl").trim()
+            if (trackId <= 0L || title.isBlank() || artist.isBlank() || preview.isBlank()) continue
+            val genre = item.optString("primaryGenreName").trim()
+            val year = item.optString("releaseDate").take(4)
+            val song = Song(
+                id = "itunes_$trackId",
+                title = title,
+                artist = artist,
+                album = item.optString("collectionName"),
+                url = preview,
+                licenseUrl = item.optString("trackViewUrl"),
+                tags = listOfNotNull(genre.takeIf { it.isNotBlank() }, year.takeIf { it.isNotBlank() })
+            )
+            val titleNormalized = normalizeForMatch(title)
+            val artistNormalized = normalizeForMatch(artist)
+            val score = when {
+                titleNormalized == queryNormalized || artistNormalized == queryNormalized -> 1200
+                titleNormalized.startsWith(queryNormalized) || artistNormalized.startsWith(queryNormalized) -> 950
+                titleNormalized.contains(queryNormalized) || artistNormalized.contains(queryNormalized) -> 800
+                else -> queryNormalized.split(' ').count { it.length >= 2 && "$titleNormalized $artistNormalized".contains(it) } * 100
+            }
+            songs += score to song
+        }
+        return songs.sortedByDescending { it.first }.map { it.second }.distinctBy { it.id }
+    }
 
     suspend fun resolveStream(song: Song): Song = withContext(Dispatchers.IO) {
         if (song.local || song.url.isNotBlank()) return@withContext song
