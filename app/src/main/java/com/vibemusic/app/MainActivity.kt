@@ -121,7 +121,7 @@ class MainActivity : ComponentActivity() {
                         volume = volume,
                         onBack = { showPlayer = false },
                         onPlayPause = { togglePlayback() },
-                        onVolume = { setVolume(it) },
+                        onVolume = { applyVolume(it) },
                         onFavorite = { current?.let { toggleFavorite(it) } },
                         isFavorite = current?.let { store.isFavorite(it.id) } == true,
                         onAddToPlaylist = { current?.let { addSongToPlaylist = it } }
@@ -230,7 +230,7 @@ class MainActivity : ComponentActivity() {
                 Column {
                     Text("ТВОЙ ЗВУК. ТВОЁ НАСТРОЕНИЕ.", color=Purple, style=MaterialTheme.typography.labelMedium, fontWeight=FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
-                    Text("Что хочешь\\nпослушать?", color=White, style=MaterialTheme.typography.headlineMedium, fontWeight=FontWeight.ExtraBold)
+                    Text("Что хочешь\nпослушать?", color=White, style=MaterialTheme.typography.headlineMedium, fontWeight=FontWeight.ExtraBold)
                     Spacer(Modifier.height(16.dp))
                     Row(verticalAlignment=Alignment.CenterVertically) {
                         Icon(Icons.Default.Search, null, tint=Ink)
@@ -400,7 +400,7 @@ class MainActivity : ComponentActivity() {
                     Text("Громкость медиа", color=White, fontWeight=FontWeight.SemiBold, modifier=Modifier.weight(1f))
                     Text("${(volume*100).roundToInt()}%", color=Purple, fontWeight=FontWeight.Bold)
                 }
-                Slider(value=volume, onValueChange={setVolume(it)}, valueRange=0f..1f)
+                Slider(value=volume, onValueChange={applyVolume(it)}, valueRange=0f..1f)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.SpaceBetween) {
                     Text("Тише", color=Soft, style=MaterialTheme.typography.bodySmall)
                     Text("Громче", color=Soft, style=MaterialTheme.typography.bodySmall)
@@ -572,7 +572,7 @@ class MainActivity : ComponentActivity() {
         controller?.let { if (it.isPlaying) it.pause() else it.play() }
     }
 
-    private fun setVolume(value: Float) {
+    private fun applyVolume(value: Float) {
         volume = value.coerceIn(0f, 1f)
         val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
         audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, (volume * max).roundToInt().coerceIn(0, max), 0)
