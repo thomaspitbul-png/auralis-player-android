@@ -20,6 +20,19 @@ android {
         versionCode = appBuildNumber
         versionName = "0.2.$appBuildNumber"
     }
+    signingConfigs {
+        create("auralisDebug") {
+            storeFile = file("${System.getProperty("user.home")}/.android/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("auralisDebug")
+        }
+    }
     buildFeatures { compose = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
