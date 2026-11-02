@@ -82,8 +82,8 @@ class AuralisActivity : ComponentActivity() {
     private var scope by mutableStateOf(CatalogScope.ALL)
     private var loading by mutableStateOf(false)
     private var resultMessage by mutableStateOf("")
-    private var jamendoClientId by mutableStateOf("")
-    private var jamendoIdDraft by mutableStateOf("")
+    private var audiusApiKey by mutableStateOf("")
+    private var audiusKeyDraft by mutableStateOf("")
     private var volume by mutableFloatStateOf(1f)
     private var positionMs by mutableLongStateOf(0L)
     private var durationMs by mutableLongStateOf(0L)
@@ -123,8 +123,8 @@ class AuralisActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        jamendoClientId = store.jamendoClientId()
-        jamendoIdDraft = jamendoClientId
+        audiusApiKey = store.audiusApiKey()
+        audiusKeyDraft = audiusApiKey
         val token = SessionToken(this, ComponentName(this, MusicPlaybackService::class.java))
         controllerFuture = MediaController.Builder(this, token).buildAsync()
         controllerFuture?.addListener({
@@ -489,14 +489,14 @@ class AuralisActivity : ComponentActivity() {
         val history = store.searchHistory()
         val scopes = listOf(CatalogScope.ALL, CatalogScope.TITLE, CatalogScope.ARTIST, CatalogScope.GENRE)
         Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
-            Text("ПОИСК ПО КАТАЛОГАМ", color = AuralisAccent, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.ExtraBold)
+            Text("ПОИСК В AUDIUS + ARCHIVE", color = AuralisAccent, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.ExtraBold)
             Text("Ищи по названию, артисту или жанру", color = AuralisText, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(10.dp))
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Например, artist:Daft Punk") },
+                placeholder = { Text("Например, Daft Punk — Get Lucky") },
                 leadingIcon = { Icon(Icons.Default.Search, null, tint = AuralisAccent) },
                 trailingIcon = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -527,7 +527,7 @@ class AuralisActivity : ComponentActivity() {
                     )
                 }
             }
-            if (jamendoClientId.isBlank()) {
+            if (audiusApiKey.isBlank()) {
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF211D2D)).padding(10.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -535,8 +535,8 @@ class AuralisActivity : ComponentActivity() {
                     Icon(Icons.Default.Info, null, tint = AuralisAccent)
                     Spacer(Modifier.width(8.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Подключи второй каталог", color = AuralisText, fontWeight = FontWeight.SemiBold)
-                        Text("Добавь свой Jamendo Client ID в настройках. Сейчас доступен Internet Archive.", color = AuralisMuted, style = MaterialTheme.typography.bodySmall)
+                        Text("Audius уже подключён", color = AuralisText, fontWeight = FontWeight.SemiBold)
+                        Text("Поиск работает без ключа. Бесплатный API-ключ повышает лимиты запросов.", color = AuralisMuted, style = MaterialTheme.typography.bodySmall)
                     }
                     TextButton(onClick = { activeTab = 4 }) { Text("Настроить") }
                 }
@@ -701,10 +701,10 @@ class AuralisActivity : ComponentActivity() {
     @Composable
     private fun SettingsScreen() {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp)) {
-            Text("Источники полной музыки", color = AuralisText, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text("Источники музыки", color = AuralisText, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(7.dp))
             Text(
-                "Auralis больше не использует короткие Apple Music previews. Доступны открытые аудиозаписи Internet Archive и, после настройки, полноценные стримы Jamendo.",
+                "Основной поиск работает через Audius. Он ищет музыку в открытом каталоге и передаёт полные потоковые записи в плеер Auralis. Internet Archive остаётся дополнительным источником открыто лицензированных записей.",
                 color = AuralisMuted,
                 style = MaterialTheme.typography.bodyMedium
             )
@@ -713,44 +713,53 @@ class AuralisActivity : ComponentActivity() {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.LibraryMusic, null, tint = AuralisAccent)
                     Spacer(Modifier.width(9.dp))
-                    Text("Jamendo API", color = AuralisText, fontWeight = FontWeight.Bold)
+                    Text("Audius API", color = AuralisText, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.weight(1f))
-                    Text(if (jamendoClientId.isBlank()) "Не подключён" else "Настроен", color = if (jamendoClientId.isBlank()) AuralisMuted else Color(0xFF9BE3BA), style = MaterialTheme.typography.labelMedium)
+                    Text("Подключён", color = Color(0xFF9BE3BA), style = MaterialTheme.typography.labelMedium)
                 }
                 Spacer(Modifier.height(8.dp))
-                Text("Jamendo отдаёт прямые stream URL полных треков и сведения об их Creative Commons лицензиях. Для подключения нужен собственный Client ID.", color = AuralisMuted, style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "Публичный поиск и воспроизведение доступны без входа в аккаунт. Бесплатный API-ключ можно добавить для повышения лимитов: до 10 запросов в секунду и 500 000 запросов в месяц по условиям бесплатного плана.",
+                    color = AuralisMuted,
+                    style = MaterialTheme.typography.bodySmall
+                )
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(
-                    value = jamendoIdDraft,
-                    onValueChange = { jamendoIdDraft = it.trim() },
+                    value = audiusKeyDraft,
+                    onValueChange = { audiusKeyDraft = it.trim() },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    label = { Text("Jamendo Client ID") },
-                    placeholder = { Text("Вставь свой Client ID") }
+                    label = { Text("Audius API Key (необязательно)") },
+                    placeholder = { Text("Вставь API Key") }
                 )
                 Spacer(Modifier.height(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { openExternal("https://devportal.jamendo.com/signup") }, modifier = Modifier.weight(1f)) {
-                        Text("Получить ID")
+                    OutlinedButton(onClick = { openExternal("https://api.audius.co/plans") }, modifier = Modifier.weight(1f)) {
+                        Text("Получить ключ")
                     }
                     Button(
                         onClick = {
-                            store.saveJamendoClientId(jamendoIdDraft)
-                            jamendoClientId = jamendoIdDraft.trim()
-                            message = "Настройки каталога сохранены"
+                            store.saveAudiusApiKey(audiusKeyDraft)
+                            audiusApiKey = audiusKeyDraft.trim()
+                            message = "Настройки Audius сохранены"
                         },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = AuralisAccent, contentColor = AuralisBg)
                     ) { Text("Сохранить") }
                 }
-                Text("ID хранится только на этом устройстве. Не вставляй пароль от аккаунта — нужен именно Client ID.", color = AuralisMuted, style = MaterialTheme.typography.labelSmall)
+                Text(
+                    "Нужен именно API Key, не Bearer Token. Ключ хранится локально на устройстве. Без ключа поиск работает в пределах публичных лимитов.",
+                    color = AuralisMuted,
+                    style = MaterialTheme.typography.labelSmall
+                )
                 TextButton(
                     onClick = {
-                        jamendoIdDraft = ""
-                        jamendoClientId = ""
-                        store.saveJamendoClientId("")
+                        audiusKeyDraft = ""
+                        audiusApiKey = ""
+                        store.saveAudiusApiKey("")
+                        message = "API-ключ удалён"
                     }
-                ) { Text("Отключить Jamendo") }
+                ) { Text("Удалить API-ключ") }
             }
             Spacer(Modifier.height(14.dp))
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(19.dp)).background(AuralisPanel).padding(15.dp)) {
@@ -767,13 +776,14 @@ class AuralisActivity : ComponentActivity() {
                 Text("Что уже умеет Auralis", color = AuralisText, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(7.dp))
                 listOf(
+                    "Поиск и полное потоковое воспроизведение Audius",
+                    "Дополнительный поиск открытых записей Internet Archive",
                     "Воспроизведение локальных аудиофайлов",
-                    "Поиск по нескольким открытым каталогам",
                     "Избранное, история и плейлисты",
                     "Очередь, перемешивание и повтор",
                     "Управление с экрана блокировки и в фоне",
                     "Таймер сна и перемотка трека",
-                    "Сведения об источнике и лицензии"
+                    "Ссылка на оригинальную страницу источника"
                 ).forEach { item ->
                     Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF9BE3BA), modifier = Modifier.size(17.dp))
@@ -830,9 +840,9 @@ class AuralisActivity : ComponentActivity() {
                 if (song.licenseName.isNotBlank()) {
                     Text("Лицензия: ${song.licenseName}", color = AuralisMuted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
                 }
-                if (song.source == "jamendo") {
+                if (song.source == "audius") {
                     TextButton(onClick = onSource, contentPadding = PaddingValues(0.dp), modifier = Modifier.height(26.dp)) {
-                        Text("Автор и источник: Jamendo ↗", style = MaterialTheme.typography.labelSmall, color = AuralisAccent)
+                        Text("Открыть оригинал на Audius ↗", style = MaterialTheme.typography.labelSmall, color = AuralisAccent)
                     }
                 }
             }
@@ -1048,7 +1058,7 @@ class AuralisActivity : ComponentActivity() {
         val selectedScope = scope
         lifecycleScope.launch {
             loading = true
-            resultMessage = "Ищем полные аудиозаписи…"
+            resultMessage = "Ищем в Audius и Internet Archive…"
             searchResults.clear()
             store.addSearchQuery(clean)
             val localMatches = store.localSongs().filter { song ->
@@ -1061,16 +1071,16 @@ class AuralisActivity : ComponentActivity() {
                 val q = clean.lowercase()
                 text.contains(q) || q.split(Regex("\\s+")).filter { it.length > 1 }.any { text.contains(it) }
             }
-            runCatching { catalog.search(clean, selectedScope, jamendoClientId) }
+            runCatching { catalog.search(clean, selectedScope, audiusApiKey) }
                 .onSuccess { outcome ->
                     val merged = (localMatches + outcome.songs).distinctBy { it.id }
                     searchResults.addAll(merged)
                     outcome.songs.forEach(store::saveSong)
                     resultMessage = buildString {
                         append("Найдено: ${merged.size}")
-                        if (jamendoClientId.isNotBlank() && outcome.jamendoError != null) {
-                            append(" · Jamendo: ")
-                            append(outcome.jamendoError.take(90))
+                        if (audiusApiKey.isNotBlank() && outcome.audiusError != null) {
+                            append(" · Audius: ")
+                            append(outcome.audiusError.take(90))
                         }
                         if (outcome.archiveError != null && outcome.songs.isEmpty()) {
                             append(" · Internet Archive: ")
@@ -1104,7 +1114,7 @@ class AuralisActivity : ComponentActivity() {
         lifecycleScope.launch {
             message = "Подготавливаем полную запись…"
             runCatching {
-                val ready = catalog.resolveStream(song)
+                val ready = catalog.resolveStream(song, audiusApiKey)
                 store.saveSong(ready)
                 val player = controller ?: error("Плеер ещё подключается")
                 val metadata = MediaMetadata.Builder()

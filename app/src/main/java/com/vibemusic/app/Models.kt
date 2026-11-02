@@ -18,8 +18,9 @@ data class Song(
     val sourceLabel: String
         get() = when {
             local -> "На устройстве"
-            source == "jamendo" || id.startsWith("jamendo_") -> "Jamendo · Creative Commons"
+            source == "audius" || id.startsWith("audius_") -> "Audius · полный стрим"
             source == "archive" || id.startsWith("archive_") -> "Internet Archive"
+            source == "jamendo" || id.startsWith("jamendo_") -> "Старая запись Jamendo"
             id.startsWith("itunes_") -> "Старое превью Apple · недоступно"
             else -> "Открытый аудиокаталог"
         }

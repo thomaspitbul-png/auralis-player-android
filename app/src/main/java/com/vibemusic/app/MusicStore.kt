@@ -50,9 +50,9 @@ class MusicStore(context: Context) {
     @Synchronized fun clearSearchHistory() = writeIds("search_history", emptyList())
     @Synchronized fun localSongs(): List<Song> = allSongs().filter { it.local }
 
-    @Synchronized fun jamendoClientId(): String = prefs.getString("jamendo_client_id", "").orEmpty().trim()
-    @Synchronized fun saveJamendoClientId(value: String) {
-        prefs.edit().putString("jamendo_client_id", value.trim()).apply()
+    @Synchronized fun audiusApiKey(): String = prefs.getString("audius_api_key", "").orEmpty().trim()
+    @Synchronized fun saveAudiusApiKey(value: String) {
+        prefs.edit().putString("audius_api_key", value.trim()).apply()
     }
 
     @Synchronized fun playlists(): List<MusicPlaylist> {

@@ -17,102 +17,132 @@ enum class CatalogScope(val label: String) {
 
 data class CatalogSearchResult(
     val songs: List<Song>,
-    val jamendoError: String? = null,
+    val audiusError: String? = null,
     val archiveError: String? = null
 )
 
 class MusicCatalogRepository {
+    private val audiusBases = listOf(
+        "https://api.audius.co/v1",
+        "https://discoveryprovider.audius.co/v1"
+    )
+
     suspend fun search(
         query: String,
         scope: CatalogScope = CatalogScope.ALL,
-        jamendoClientId: String = ""
+        audiusApiKey: String = ""
     ): CatalogSearchResult = withContext(Dispatchers.IO) {
         val clean = query.trim().take(100)
         require(clean.isNotBlank()) { "Введи название трека или исполнителя" }
 
         coroutineScope {
+            val audiusTask = async { runCatching { searchAudius(clean, scope, audiusApiKey.trim()) } }
             val archiveTask = async { runCatching { searchArchive(clean, scope) } }
-            val jamendoTask = async {
-                if (jamendoClientId.isBlank()) Result.success(emptyList())
-                else runCatching { searchJamendo(clean, scope, jamendoClientId.trim()) }
-            }
-
+            val audiusResult = audiusTask.await()
             val archiveResult = archiveTask.await()
-            val jamendoResult = jamendoTask.await()
+            val audiusSongs = audiusResult.getOrDefault(emptyList())
             val archiveSongs = archiveResult.getOrDefault(emptyList())
-            val jamendoSongs = jamendoResult.getOrDefault(emptyList())
-            val merged = (jamendoSongs + archiveSongs)
+            val merged = (audiusSongs + archiveSongs)
                 .distinctBy { it.id }
                 .sortedWith(
-                    compareByDescending<Song> { relevanceScore(it, clean) }
-                        .thenBy { if (it.source == "jamendo") 0 else 1 }
+                    compareByDescending<Song> { relevanceScore(it, clean, scope) }
+                        .thenBy { if (it.source == "audius") 0 else 1 }
                 )
-                .take(80)
+                .take(100)
 
             CatalogSearchResult(
                 songs = merged,
-                jamendoError = jamendoResult.exceptionOrNull()?.message,
+                audiusError = audiusResult.exceptionOrNull()?.message,
                 archiveError = archiveResult.exceptionOrNull()?.message
             )
         }
     }
 
-    private fun searchJamendo(query: String, scope: CatalogScope, clientId: String): List<Song> {
+    private fun searchAudius(query: String, scope: CatalogScope, apiKey: String): List<Song> {
         val params = linkedMapOf(
-            "client_id" to clientId,
-            "format" to "json",
-            "limit" to "40",
-            "order" to "relevance",
-            "audioformat" to "mp32",
-            "include" to "licenses",
-            "type" to "single albumtrack"
+            "query" to query,
+            "limit" to "50",
+            "sort_method" to "relevant",
+            "app_name" to "Auralis"
         )
-        when (scope) {
-            CatalogScope.ALL -> params["search"] = query
-            CatalogScope.TITLE -> params["namesearch"] = query
-            CatalogScope.ARTIST -> params["artist_name"] = query
-            CatalogScope.GENRE -> params["fuzzytags"] = query
-        }
-
-        val address = "https://api.jamendo.com/v3.0/tracks/?" +
-            params.entries.joinToString("&") { "${enc(it.key)}=${enc(it.value)}" }
-        val root = JSONObject(httpGet(address))
-        val headers = root.optJSONObject("headers")
-        if (headers?.optString("status")?.equals("success", true) == false) {
-            throw IllegalStateException(headers.optString("error_message").ifBlank { "Jamendo отклонил запрос. Проверь Client ID." })
-        }
-        val tracks = root.optJSONArray("results") ?: JSONArray()
-        val songs = ArrayList<Song>()
-
-        for (index in 0 until tracks.length()) {
-            val item = tracks.optJSONObject(index) ?: continue
-            val id = item.optString("id").trim()
-            val title = item.optString("name").trim()
-            val artist = item.optString("artist_name").trim()
-            val stream = item.optString("audio").trim()
-            val page = item.optString("shareurl").trim()
-            val license = item.optString("license_ccurl").trim()
-            if (id.isBlank() || title.isBlank() || artist.isBlank() || stream.isBlank() || license.isBlank()) continue
-
-            val seconds = item.optLong("duration", 0L).coerceAtLeast(0L)
-            songs += Song(
-                id = "jamendo_$id",
-                title = title,
-                artist = artist,
-                album = item.optString("album_name"),
-                url = stream,
-                licenseUrl = license,
-                tags = listOf(item.optString("musicinfo"))
-                    .filter { it.isNotBlank() && it != "null" },
-                source = "jamendo",
-                durationMs = seconds * 1000L,
-                artworkUrl = item.optString("image"),
-                sourcePageUrl = page.ifBlank { "https://www.jamendo.com/track/$id" },
-                licenseName = item.optString("license_cc")
+        if (scope == CatalogScope.GENRE) audiusGenre(query)?.let { params["genre"] = it }
+        val queryString = params.entries.joinToString("&") { "${enc(it.key)}=${enc(it.value)}" }
+        val headers = if (apiKey.isBlank()) emptyMap() else mapOf("X-API-Key" to apiKey)
+        var lastError: Throwable? = null
+        for (base in audiusBases) {
+            val response = runCatching { JSONObject(httpGet("$base/tracks/search?$queryString", headers)) }
+            if (response.isFailure) {
+                lastError = response.exceptionOrNull()
+                continue
+            }
+            val root = response.getOrThrow()
+            val tracks = root.optJSONArray("data")
+                ?: root.optJSONObject("data")?.let { JSONArray().put(it) }
+                ?: JSONArray()
+            val songs = ArrayList<Song>()
+            for (index in 0 until tracks.length()) {
+                val item = tracks.optJSONObject(index) ?: continue
+                val id = item.optString("id").trim()
+                val title = item.optString("title").trim()
+                if (id.isBlank() || title.isBlank()) continue
+                if (isExplicitlyFalse(item.opt("isStreamable")) || item.optBoolean("isStreamGated", false)) continue
+                val user = item.optJSONObject("user")
+                val artist = user?.optString("name").orEmpty().ifBlank {
+                    user?.optString("handle").orEmpty().ifBlank { "Неизвестный исполнитель" }
+                }
+                val handle = user?.optString("handle").orEmpty()
+                val permalink = item.optString("permalink").trim()
+                val sourcePage = when {
+                    permalink.startsWith("https://") || permalink.startsWith("http://") -> permalink
+                    handle.isNotBlank() && permalink.isNotBlank() -> "https://audius.co/${enc(handle)}/${enc(permalink)}"
+                    else -> "https://audius.co"
+                }
+                val artwork = item.optJSONObject("artwork")
+                val artworkUrl = artwork?.optString("_480x480").orEmpty()
+                    .ifBlank { artwork?.optString("_1000x1000").orEmpty() }
+                val tags = readList(item.opt("tags")).toMutableList()
+                listOf(item.optString("genre"), item.optString("mood")).forEach {
+                    if (it.isNotBlank() && it != "null") tags += it
+                }
+                songs += Song(
+                    id = "audius_$id",
+                    title = title,
+                    artist = artist,
+                    album = item.optString("album"),
+                    tags = tags.distinct().take(12),
+                    source = "audius",
+                    durationMs = item.optLong("duration", 0L).coerceAtLeast(0L) * 1000L,
+                    artworkUrl = artworkUrl,
+                    sourcePageUrl = sourcePage
+                )
+            }
+            return songs.sortedWith(
+                compareByDescending<Song> { relevanceScore(it, query, scope) }
+                    .thenByDescending { it.tags.size }
             )
         }
+        throw IllegalStateException(lastError?.message ?: "Audius временно недоступен", lastError)
+    }
 
-        return songs.sortedByDescending { relevanceScore(it, query) }
+    private fun audiusGenre(query: String): String? {
+        val genres = listOf(
+            "Electronic", "Rock", "Metal", "Alternative", "Hip-Hop/Rap", "Experimental",
+            "Punk", "Folk", "Pop", "Ambient", "Soundtrack", "World", "Jazz", "Acoustic",
+            "Funk", "R&B/Soul", "Devotional", "Classical", "Reggae", "Podcasts",
+            "Country", "Spoken Word", "Comedy", "Blues", "Kids", "Audiobooks", "Latin",
+            "Lo-Fi", "Hyperpop", "Dancehall", "Techno", "Trap", "House", "Tech House",
+            "Deep House", "Disco", "Electro", "Jungle", "Progressive House", "Hardstyle",
+            "Glitch Hop", "Trance", "Future Bass", "Future House", "Tropical House",
+            "Downtempo", "Drum & Bass", "Dubstep", "Jersey Club", "Vaporwave", "Moombahton"
+        )
+        return genres.firstOrNull { it.equals(query.trim(), ignoreCase = true) }
+    }
+
+    private fun isExplicitlyFalse(value: Any?): Boolean = when (value) {
+        is Boolean -> !value
+        is String -> value.equals("false", true) || value == "0"
+        is Number -> value.toInt() == 0
+        else -> false
     }
 
     private fun searchArchive(query: String, scope: CatalogScope): List<Song> {
@@ -128,7 +158,10 @@ class MusicCatalogRepository {
             if (safe.isBlank()) null
             else {
                 val exact = fields.joinToString(" OR ") { """$it:("$safe")""" }
-                "mediatype:audio AND licenseurl:* AND ($exact)"
+                val words = safe.split(Regex("\\s+")).filter { it.length >= 2 }.distinct()
+                val broad = fields.flatMap { field -> words.map { "$field:$it" } }.joinToString(" OR ")
+                if (broad.isBlank()) "mediatype:audio AND ($exact)"
+                else "mediatype:audio AND ($exact OR $broad)"
             }
         }.distinct()
 
@@ -198,11 +231,18 @@ class MusicCatalogRepository {
             .map { it.first }
     }
 
-    suspend fun resolveStream(song: Song): Song = withContext(Dispatchers.IO) {
+    suspend fun resolveStream(song: Song, audiusApiKey: String = ""): Song = withContext(Dispatchers.IO) {
+        if (song.local) {
+            if (song.url.isBlank()) throw IllegalStateException("Не удалось прочитать локальный файл")
+            return@withContext song
+        }
+        if (song.source == "audius" || song.id.startsWith("audius_")) {
+            val trackId = song.id.removePrefix("audius_")
+            return@withContext song.copy(url = resolveAudiusStream(trackId, audiusApiKey.trim()))
+        }
         if (song.url.isNotBlank()) return@withContext song
-        if (song.local) throw IllegalStateException("Не удалось прочитать локальный файл")
         if (song.id.startsWith("itunes_")) {
-            throw IllegalStateException("Старые короткие превью Apple больше не используются. Найди трек заново.")
+            throw IllegalStateException("Короткие превью Apple не поддерживаются. Найди трек заново.")
         }
 
         val root = JSONObject(httpGet("https://archive.org/metadata/${enc(song.id)}"))
@@ -232,6 +272,52 @@ class MusicCatalogRepository {
         song.copy(url = "https://archive.org/download/$safeId/$safePath")
     }
 
+    private fun resolveAudiusStream(trackId: String, apiKey: String): String {
+        val headers = if (apiKey.isBlank()) emptyMap() else mapOf("X-API-Key" to apiKey)
+        var lastError: Throwable? = null
+        for (base in audiusBases) {
+            var current = URL("$base/tracks/${enc(trackId)}/stream?app_name=Auralis")
+            try {
+                for (hop in 0..5) {
+                    val connection = (current.openConnection() as HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        connectTimeout = 12000
+                        readTimeout = 18000
+                        instanceFollowRedirects = false
+                        setRequestProperty("Accept", "audio/mpeg, audio/*;q=0.9, application/json;q=0.5")
+                        setRequestProperty("User-Agent", "AuralisAndroid/0.3")
+                        headers.forEach { (name, value) -> setRequestProperty(name, value) }
+                    }
+                    val code = connection.responseCode
+                    if (code in 300..399) {
+                        val location = connection.getHeaderField("Location")
+                        connection.disconnect()
+                        if (location.isNullOrBlank()) throw IllegalStateException("Audius не вернул адрес аудиопотока")
+                        current = URL(current, location)
+                        continue
+                    }
+                    if (code !in 200..299) {
+                        val detail = connection.errorStream?.bufferedReader()?.use { it.readText().take(500) }.orEmpty()
+                        connection.disconnect()
+                        throw IllegalStateException("Audius не смог открыть трек ($code): $detail")
+                    }
+                    val contentType = connection.contentType.orEmpty().lowercase()
+                    if (contentType.contains("json")) {
+                        val detail = connection.inputStream.bufferedReader().use { it.readText().take(500) }
+                        connection.disconnect()
+                        throw IllegalStateException("Audius вернул ошибку вместо аудио: $detail")
+                    }
+                    connection.disconnect()
+                    return current.toString()
+                }
+                throw IllegalStateException("Слишком много перенаправлений потока Audius")
+            } catch (error: Exception) {
+                lastError = error
+            }
+        }
+        throw IllegalStateException(lastError?.message ?: "Не удалось получить поток Audius", lastError)
+    }
+
     private fun isOpenLicense(value: String): Boolean {
         val license = value.lowercase()
         return license.startsWith("https://creativecommons.org/licenses/") ||
@@ -251,14 +337,22 @@ class MusicCatalogRepository {
             .replace(Regex("\\s+"), " ")
             .trim()
 
-    private fun relevanceScore(song: Song, query: String): Int {
+    private fun relevanceScore(song: Song, query: String, scope: CatalogScope = CatalogScope.ALL): Int {
         val q = normalize(query)
         val title = normalize(song.title)
         val artist = normalize(song.artist)
-        val combined = "$title $artist ${normalize(song.tags.joinToString(" "))}"
+        val tags = normalize(song.tags.joinToString(" "))
+        val combined = "$title $artist $tags"
         var score = 0
         if (title == q) score += 1200 else if (title.contains(q)) score += 900
         if (artist == q) score += 850 else if (artist.contains(q)) score += 700
+        if (tags.contains(q)) score += 450
+        when (scope) {
+            CatalogScope.TITLE -> if (title.contains(q)) score += 500
+            CatalogScope.ARTIST -> if (artist.contains(q)) score += 500
+            CatalogScope.GENRE -> if (tags.contains(q)) score += 700
+            CatalogScope.ALL -> Unit
+        }
         val words = q.split(' ').filter { it.length >= 2 }.distinct()
         val matched = words.count { it in combined }
         score += matched * 100
@@ -287,13 +381,14 @@ class MusicCatalogRepository {
         return if (latin != clean) listOf(latin) else emptyList()
     }
 
-    private fun httpGet(address: String): String {
+    private fun httpGet(address: String, headers: Map<String, String> = emptyMap()): String {
         val connection = (URL(address).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 12000
             readTimeout = 18000
             setRequestProperty("User-Agent", "AuralisAndroid/0.3")
             setRequestProperty("Accept", "application/json")
+            headers.forEach { (name, value) -> setRequestProperty(name, value) }
             instanceFollowRedirects = true
         }
         try {
