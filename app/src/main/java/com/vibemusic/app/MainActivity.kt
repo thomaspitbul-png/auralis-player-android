@@ -76,14 +76,16 @@ class MainActivity : ComponentActivity() {
         future = MediaController.Builder(this, token).buildAsync()
         future?.addListener({
             runCatching { future?.get() }.onSuccess { c ->
-                controller = c
-                c.addListener(object : Player.Listener {
+                if (c != null) {
+                    controller = c
+                    c.addListener(object : Player.Listener {
                     override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
                     override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
                         current = item?.mediaId?.let { store.getSong(it) }
                         current?.let { store.addHistory(it) }
                     }
-                })
+                    })
+                }
             }
         }, mainExecutor)
         setContent { AuralisScreen() }
